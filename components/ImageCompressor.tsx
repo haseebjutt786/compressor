@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
+import { UploadIcon, CheckCircleIcon, AlertTriangleIcon, XCircleIcon, DownloadIcon } from "@/components/icons";
 import { compressImage, validateImageFile, formatSize } from "@/lib/compressor";
 import type { CompressResult } from "@/lib/compressor";
 import type { Preset } from "@/config/presets";
+import { trackEvent, trackCompressionResult } from "@/lib/analytics";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -20,34 +22,156 @@ interface ResultInfo {
   width: number;
   height: number;
   objectUrl: string;
-  qualityUsed?: number; // undefined for already_small
+  qualityUsed?: number;
   filename: string;
 }
 
 type UIState =
   | { phase: "idle" }
   | { phase: "compressing" }
-  | { phase: "done"; original: OriginalInfo; result: ResultInfo }
+  | { phase: "done";          original: OriginalInfo; result: ResultInfo }
   | { phase: "already_small"; original: OriginalInfo; result: ResultInfo }
-  | { phase: "error"; message: string }
-  | { phase: "impossible"; message: string; smallestKB?: string };
+  | { phase: "error";         message: string }
+  | { phase: "impossible";    message: string; smallestKB?: string };
+
+// ─── Count-up hook ────────────────────────────────────────────────────────────
+function useCountUp(target: number, duration = 600): number {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    setValue(0);
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min((now - start) / duration, 1);
+      // ease-out cubic
+      const ease = 1 - Math.pow(1 - t, 3);
+      setValue(Math.round(ease * target));
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }, [target, duration]);
+  return value;
+}
+
+// ─── Animated progress bar ────────────────────────────────────────────────────
+function CompressingState() {
+  const [progress, setProgress] = useState(8);
+
+  useEffect(() => {
+    // Simulate binary-search progress: fast start, asymptotic approach to 92%
+    const intervals = [
+      { delay: 0,    value: 20 },
+      { delay: 300,  value: 38 },
+      { delay: 700,  value: 54 },
+      { delay: 1200, value: 67 },
+      { delay: 1800, value: 78 },
+      { delay: 2500, value: 85 },
+      { delay: 3500, value: 91 },
+    ];
+    const timers = intervals.map(({ delay, value }) =>
+      setTimeout(() => setProgress(value), delay)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  return (
+    <div className="rounded-2xl border p-10 text-center"
+      style={{ background: "#ffffff", borderColor: "#e4e4df" }}>
+      {/* Circular spinner */}
+      <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full"
+        style={{ background: "#d1fae5" }}>
+        <svg className="h-7 w-7 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="#d1fae5" strokeWidth="3" />
+          <path d="M12 2a10 10 0 0110 10" stroke="#059669" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      </div>
+
+      <p className="font-semibold text-sm mb-1" style={{ color: "#18181b" }}>
+        Compressing…
+      </p>
+      <p className="text-xs mb-5" style={{ color: "#a1a1aa" }}>
+        Binary-search quality pass · nothing leaves your device
+      </p>
+
+      {/* Shimmer progress bar */}
+      <div className="mx-auto w-full max-w-xs rounded-full overflow-hidden h-2"
+        style={{ background: "#f4f4f5" }}>
+        <div
+          className="h-2 rounded-full shimmer-bar transition-all duration-500 ease-out"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <p className="mt-2 text-xs tabular-nums" style={{ color: "#a1a1aa" }}>
+        {progress}%
+      </p>
+    </div>
+  );
+}
+
+// ─── Animated size display ────────────────────────────────────────────────────
+function AnimatedKB({ bytes }: { bytes: number }) {
+  const kb = bytes / 1024;
+  const isMB = bytes >= 1024 * 1024;
+  const target = isMB ? parseFloat((bytes / (1024 * 1024)).toFixed(2)) * 100 : Math.round(kb * 10);
+  const animated = useCountUp(target, 550);
+  const display = isMB
+    ? `${(animated / 100).toFixed(2)} MB`
+    : `${(animated / 10).toFixed(1)} KB`;
+  return <span className="animate-count-pop tabular-nums">{display}</span>;
+}
+
+// ─── Download button with checkmark flash ────────────────────────────────────
+function DownloadButton({
+  href, filename, onDownload,
+}: { href: string; filename: string; onDownload: () => void }) {
+  const [clicked, setClicked] = useState(false);
+
+  const handleClick = () => {
+    onDownload();
+    setClicked(true);
+    setTimeout(() => setClicked(false), 2200);
+  };
+
+  return (
+    <a
+      href={href}
+      download={filename}
+      onClick={handleClick}
+      className="btn-download flex w-full items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-semibold text-white"
+      style={{ background: clicked ? "#065f46" : "#059669" }}
+    >
+      {clicked ? (
+        <>
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline
+              points="20 6 9 17 4 12"
+              style={{
+                strokeDasharray: 24,
+                strokeDashoffset: 0,
+                animation: "check-draw 0.35s ease forwards",
+              }}
+            />
+          </svg>
+          Saved!
+        </>
+      ) : (
+        <>
+          <DownloadIcon size={16} aria-hidden="true" />
+          DownloadIcon {filename}
+        </>
+      )}
+    </a>
+  );
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function getNaturalDimensions(
-  file: File
-): Promise<{ width: number; height: number }> {
+function getNaturalDimensions(file: File): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: 0, height: 0 });
-    };
+    img.onload  = () => { URL.revokeObjectURL(url); resolve({ width: img.naturalWidth,  height: img.naturalHeight }); };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ width: 0, height: 0 }); };
     img.src = url;
   });
 }
@@ -63,332 +187,266 @@ function cleanupState(state: UIState) {
 
 interface Props {
   preset?: Preset;
-  /**
-   * If no preset is provided the user can type a manual KB target.
-   * The manual target defaults to this value.
-   */
   defaultManualKB?: number;
 }
 
 export default function ImageCompressor({ preset, defaultManualKB = 100 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [ui, setUi] = useState<UIState>({ phase: "idle" });
-  // Keep a ref to ui so processFile always reads current state without
-  // needing ui in its dependency array (avoids stale-closure re-creation).
-  const uiRef = useRef<UIState>(ui);
+  const [ui, setUi]       = useState<UIState>({ phase: "idle" });
+  const uiRef             = useRef<UIState>(ui);
   uiRef.current = ui;
-
   const [manualKB, setManualKB] = useState<number>(defaultManualKB);
   const [isDragging, setIsDragging] = useState(false);
 
-  const processFile = useCallback(
-    async (file: File) => {
-      // Clean up object URLs from any previous result.
-      cleanupState(uiRef.current);
+  const processFile = useCallback(async (file: File) => {
+    cleanupState(uiRef.current);
 
-      // Validate
-      const validationError = validateImageFile(file);
-      if (validationError) {
-        setUi({ phase: "error", message: validationError });
-        return;
-      }
+    const validationError = validateImageFile(file);
+    if (validationError) { setUi({ phase: "error", message: validationError }); return; }
 
-      // Get original dimensions for the before-card
-      const { width: origW, height: origH } = await getNaturalDimensions(file);
-      const originalInfo: OriginalInfo = {
-        name: file.name,
-        bytes: file.size,
-        width: origW,
-        height: origH,
-        objectUrl: URL.createObjectURL(file),
-      };
+    const { width: origW, height: origH } = await getNaturalDimensions(file);
+    const originalInfo: OriginalInfo = {
+      name: file.name, bytes: file.size,
+      width: origW, height: origH,
+      objectUrl: URL.createObjectURL(file),
+    };
 
-      setUi({ phase: "compressing" });
+    setUi({ phase: "compressing" });
 
+    const presetId = preset?.id ?? "manual";
+    const targetKB = preset?.targetSizeKB ?? preset?.maxSizeKB ?? manualKB;
+    const maxKB    = preset?.maxSizeKB    ?? manualKB;
+    trackEvent("compress_start", { preset: presetId, target_kb: targetKB });
 
-      // Build options from preset or manual input
-      const targetKB = preset?.targetSizeKB ?? preset?.maxSizeKB ?? manualKB;
-      const maxKB = preset?.maxSizeKB ?? manualKB;
-
-      let result: CompressResult;
-      try {
-        result = await compressImage(file, {
-          maxSizeKB: maxKB,
-          targetSizeKB: targetKB,
-          width: preset?.width,
-          height: preset?.height,
-          cropMode: preset?.cropMode ?? "cover",
-        });
-      } catch (err: unknown) {
-        URL.revokeObjectURL(originalInfo.objectUrl);
-        setUi({
-          phase: "error",
-          message:
-            err instanceof Error
-              ? err.message
-              : "An unexpected error occurred during compression.",
-        });
-        return;
-      }
-
-      const outputFilename = `${preset?.filename ?? "compressed-image"}.jpg`;
-
-      if (result.status === "error") {
-        URL.revokeObjectURL(originalInfo.objectUrl);
-        setUi({ phase: "error", message: result.reason });
-        return;
-      }
-
-      if (result.status === "impossible") {
-        URL.revokeObjectURL(originalInfo.objectUrl);
-        setUi({
-          phase: "impossible",
-          message: result.reason,
-          smallestKB: result.smallestBytes
-            ? formatSize(result.smallestBytes)
-            : undefined,
-        });
-        return;
-      }
-
-      const resultInfo: ResultInfo = {
-        bytes: result.outputBytes,
-        width: result.outputWidth,
-        height: result.outputHeight,
-        objectUrl: URL.createObjectURL(result.blob),
-        qualityUsed:
-          result.status === "success" ? result.qualityUsed : undefined,
-        filename: outputFilename,
-      };
-
-      setUi({
-        phase: result.status === "already_small" ? "already_small" : "done",
-        original: originalInfo,
-        result: resultInfo,
+    let result: CompressResult;
+    try {
+      result = await compressImage(file, {
+        maxSizeKB: maxKB, targetSizeKB: targetKB,
+        width: preset?.width, height: preset?.height,
+        cropMode: preset?.cropMode ?? "cover",
       });
-    },
-    [preset, manualKB]
-  );
+    } catch (err: unknown) {
+      URL.revokeObjectURL(originalInfo.objectUrl);
+      const msg = err instanceof Error ? err.message : "An unexpected error occurred during compression.";
+      trackCompressionResult(presetId, targetKB, "error", { reason: msg.slice(0, 100) });
+      setUi({ phase: "error", message: msg });
+      return;
+    }
 
-  // ── Event handlers ──────────────────────────────────────────────────────
+    const outputFilename = `${preset?.filename ?? "compressed-image"}.jpg`;
+
+    if (result.status === "error") {
+      URL.revokeObjectURL(originalInfo.objectUrl);
+      trackCompressionResult(presetId, targetKB, "error", { reason: result.reason.slice(0, 100) });
+      setUi({ phase: "error", message: result.reason });
+      return;
+    }
+
+    if (result.status === "impossible") {
+      URL.revokeObjectURL(originalInfo.objectUrl);
+      trackCompressionResult(presetId, targetKB, "impossible");
+      setUi({ phase: "impossible", message: result.reason,
+        smallestKB: result.smallestBytes ? formatSize(result.smallestBytes) : undefined });
+      return;
+    }
+
+    const outputKB = Math.round(result.outputBytes / 1024);
+    if (result.status === "already_small") {
+      trackCompressionResult(presetId, targetKB, "already_small", { output_kb: outputKB });
+    } else {
+      trackCompressionResult(presetId, targetKB, "success", {
+        output_kb: outputKB,
+        quality_pct: result.status === "success" ? Math.round(result.qualityUsed * 100) : undefined,
+      });
+    }
+
+    const resultInfo: ResultInfo = {
+      bytes: result.outputBytes, width: result.outputWidth, height: result.outputHeight,
+      objectUrl: URL.createObjectURL(result.blob),
+      qualityUsed: result.status === "success" ? result.qualityUsed : undefined,
+      filename: outputFilename,
+    };
+
+    setUi({
+      phase: result.status === "already_small" ? "already_small" : "done",
+      original: originalInfo, result: resultInfo,
+    });
+  }, [preset, manualKB]);
+
+  // ── Event handlers ────────────────────────────────────────────────────────
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) processFile(file);
-    // Reset so the same file can be re-selected after a reset.
     e.target.value = "";
   };
-
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setIsDragging(false);
+    e.preventDefault(); setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) processFile(file);
   };
+  const handleReset = () => { cleanupState(uiRef.current); setUi({ phase: "idle" }); };
 
-  const handleReset = () => {
-    cleanupState(uiRef.current);
-    setUi({ phase: "idle" });
-  };
+  const targetLabel = preset ? `Max ${preset.maxSizeKB} KB` : `Max ${manualKB} KB`;
 
-  // ── Render helpers ──────────────────────────────────────────────────────
-
-  const targetLabel = preset
-    ? `Max ${preset.maxSizeKB} KB`
-    : `Max ${manualKB} KB`;
-
-  // ── Render ──────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-6">
-      {/* Manual KB input (shown only when no preset) */}
+    <div className="w-full max-w-2xl mx-auto space-y-5">
+
+      {/* Manual KB input */}
       {!preset && (
-        <div className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-4">
-          <label
-            htmlFor="manual-kb"
-            className="text-sm font-medium text-zinc-700 whitespace-nowrap"
-          >
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border p-4"
+          style={{ background: "#ffffff", borderColor: "#e4e4df" }}>
+          <label htmlFor="manual-kb" className="text-sm font-semibold whitespace-nowrap"
+            style={{ color: "#18181b" }}>
             Target size (KB)
           </label>
           <input
-            id="manual-kb"
-            type="number"
-            min={1}
-            max={10240}
-            value={manualKB}
+            id="manual-kb" type="number" min={1} max={10240} value={manualKB}
             onChange={(e) => setManualKB(Math.max(1, Number(e.target.value)))}
-            className="w-28 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+            className="w-28 rounded-lg border px-3 py-1.5 text-sm font-medium tabular-nums"
+            style={{ borderColor: "#d4d4d8", color: "#18181b",
+              outline: "none", background: "#fafaf8" }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = "#059669";
+              e.currentTarget.style.boxShadow = "0 0 0 3px rgba(5,150,105,0.15)"; }}
+            onBlur={(e)  => { e.currentTarget.style.borderColor = "#d4d4d8";
+              e.currentTarget.style.boxShadow = "none"; }}
           />
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs" style={{ color: "#a1a1aa" }}>
             Output will never exceed this value
           </span>
         </div>
       )}
 
-      {/* Drop zone / upload trigger */}
+      {/* Drop zone */}
       {(ui.phase === "idle" || ui.phase === "error" || ui.phase === "impossible") && (
         <div
-          role="button"
-          tabIndex={0}
-          aria-label="Upload image"
+          role="button" tabIndex={0} aria-label="Upload image"
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed p-10 transition-colors ${
-            isDragging
-              ? "border-emerald-400 bg-emerald-50"
-              : "border-zinc-300 bg-zinc-50 hover:border-emerald-400 hover:bg-emerald-50"
+          className={`flex cursor-pointer flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed p-12 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+            isDragging ? "dropzone-drag" : "dropzone-idle"
           }`}
         >
-          <svg
-            className="h-10 w-10 text-zinc-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
-            />
-          </svg>
+          {/* Floating upload icon */}
+          <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${
+            isDragging ? "" : "animate-float"
+          }`}
+            style={{ background: isDragging ? "#d1fae5" : "#f0fdf4" }}>
+          <UploadIcon size={26} color={isDragging ? "#059669" : "#6ee7b7"} strokeWidth={1.8} />
+          </div>
+
           <div className="text-center">
-            <p className="text-sm font-semibold text-zinc-700">
+            <p className="text-sm font-semibold" style={{ color: "#18181b" }}>
               Drop your image here, or{" "}
-              <span className="text-emerald-600 underline underline-offset-2">
+              <span style={{ color: "#059669", textDecoration: "underline", textUnderlineOffset: "3px" }}>
                 browse
               </span>
             </p>
-            <p className="mt-1 text-xs text-zinc-400">
+            <p className="mt-1 text-xs" style={{ color: "#a1a1aa" }}>
               JPG, PNG or WebP · {targetLabel}
             </p>
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
+
+          <input ref={fileInputRef} type="file"
             accept="image/jpeg,image/jpg,image/png,image/webp"
-            className="sr-only"
-            onChange={handleFileChange}
-            aria-label="Select image file"
-          />
+            className="sr-only" onChange={handleFileChange} aria-label="Select image file" />
         </div>
       )}
 
-      {/* Error state */}
+      {/* Error */}
       {ui.phase === "error" && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <p className="text-sm font-semibold text-red-700">⚠ Error</p>
-          <p className="mt-1 text-sm text-red-600">{ui.message}</p>
-          <button
-            onClick={handleReset}
-            className="mt-3 text-xs font-medium text-red-700 underline hover:no-underline"
-          >
-            Try another file
-          </button>
+        <div className="rounded-xl border p-4 flex gap-3"
+          style={{ background: "#fff1f2", borderColor: "#fecdd3" }}>
+          <XCircleIcon size={18} color="#e11d48" className="shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "#be123c" }}>Error</p>
+            <p className="mt-0.5 text-sm" style={{ color: "#e11d48" }}>{ui.message}</p>
+            <button onClick={handleReset}
+              className="mt-2 text-xs font-medium underline underline-offset-2"
+              style={{ color: "#be123c" }}>
+              Try another file
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Impossible state */}
+      {/* Impossible */}
       {ui.phase === "impossible" && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-800">
-            ⚠ Target too small
-          </p>
-          <p className="mt-1 text-sm text-amber-700">{ui.message}</p>
-          <button
-            onClick={handleReset}
-            className="mt-3 text-xs font-medium text-amber-800 underline hover:no-underline"
-          >
-            Try a different image or larger target
-          </button>
+        <div className="rounded-xl border p-4 flex gap-3"
+          style={{ background: "#fffbeb", borderColor: "#fde68a" }}>
+          <AlertTriangleIcon size={18} color="#d97706" className="shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold" style={{ color: "#92400e" }}>Target too small</p>
+            <p className="mt-0.5 text-sm" style={{ color: "#b45309" }}>{ui.message}</p>
+            <button onClick={handleReset}
+              className="mt-2 text-xs font-medium underline underline-offset-2"
+              style={{ color: "#92400e" }}>
+              Try a different image or larger target
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Compressing spinner */}
-      {ui.phase === "compressing" && (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-10">
-          <svg
-            className="h-8 w-8 animate-spin text-emerald-500"
-            fill="none"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8v8H4z"
-            />
-          </svg>
-          <p className="text-sm font-medium text-zinc-600">
-            Compressing… this takes a few seconds
-          </p>
-          <p className="text-xs text-zinc-400">
-            Everything runs in your browser — nothing is uploaded
-          </p>
-        </div>
-      )}
+      {/* Compressing — animated progress */}
+      {ui.phase === "compressing" && <CompressingState />}
 
-      {/* Done / Already-small result */}
+      {/* Done / Already-small */}
       {(ui.phase === "done" || ui.phase === "already_small") && (
-        <div className="space-y-4">
-          {/* Before / After cards */}
+        <div className="space-y-4 animate-fade-up">
+
+          {/* Before / After */}
           <div className="grid grid-cols-2 gap-4">
             {/* Before */}
-            <div className="rounded-xl border border-zinc-200 bg-white p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                Before
-              </p>
+            <div className="rounded-2xl border p-4 space-y-3"
+              style={{ background: "#ffffff", borderColor: "#e4e4df" }}>
+              <p className="text-xs font-bold uppercase tracking-widest"
+                style={{ color: "#a1a1aa" }}>Before</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={ui.original.objectUrl}
-                alt="Original image"
-                className="w-full rounded-lg object-cover aspect-square bg-zinc-100"
-              />
-              <div className="space-y-0.5 text-xs text-zinc-600">
-                <p className="font-semibold text-zinc-800 truncate">
+              <img src={ui.original.objectUrl} alt="Original image"
+                className="w-full rounded-xl object-cover aspect-square"
+                style={{ background: "#f4f4f5" }} />
+              <div className="space-y-0.5 text-xs" style={{ color: "#52525b" }}>
+                <p className="font-semibold truncate" style={{ color: "#18181b" }}>
                   {ui.original.name}
                 </p>
-                <p>{formatSize(ui.original.bytes)}</p>
-                <p>
+                <p className="tabular-nums font-medium">
+                  <AnimatedKB bytes={ui.original.bytes} />
+                </p>
+                <p style={{ color: "#a1a1aa" }}>
                   {ui.original.width}×{ui.original.height} px
                 </p>
               </div>
             </div>
 
             {/* After */}
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
+            <div className="rounded-2xl border p-4 space-y-3"
+              style={{ background: "#f0fdf4", borderColor: "#6ee7b7" }}>
+              <p className="text-xs font-bold uppercase tracking-widest"
+                style={{ color: "#059669" }}>
                 {ui.phase === "already_small" ? "Already fits ✓" : "After"}
               </p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={ui.result.objectUrl}
-                alt="Compressed image"
-                className="w-full rounded-lg object-cover aspect-square bg-zinc-100"
-              />
-              <div className="space-y-0.5 text-xs text-zinc-600">
-                <p className="font-semibold text-emerald-700">
-                  {formatSize(ui.result.bytes)}
+              <img src={ui.result.objectUrl} alt="Compressed image"
+                className="w-full rounded-xl object-cover aspect-square"
+                style={{ background: "#d1fae5" }} />
+              <div className="space-y-0.5 text-xs" style={{ color: "#52525b" }}>
+                <p className="font-bold tabular-nums" style={{ color: "#059669" }}>
+                  <AnimatedKB bytes={ui.result.bytes} />
                   {ui.phase === "already_small" && (
-                    <span className="ml-1 text-emerald-600">(unchanged)</span>
+                    <span className="ml-1 font-normal text-xs" style={{ color: "#34d399" }}>
+                      (unchanged)
+                    </span>
                   )}
                 </p>
-                <p>
+                <p style={{ color: "#a1a1aa" }}>
                   {ui.result.width}×{ui.result.height} px
                 </p>
                 {ui.result.qualityUsed !== undefined && (
-                  <p className="text-zinc-400">
+                  <p style={{ color: "#a1a1aa" }}>
                     Quality: {(ui.result.qualityUsed * 100).toFixed(0)}%
                   </p>
                 )}
@@ -398,13 +456,11 @@ export default function ImageCompressor({ preset, defaultManualKB = 100 }: Props
 
           {/* Savings banner */}
           {ui.phase === "done" && (
-            <div className="rounded-lg bg-emerald-600 px-4 py-2.5 text-center text-sm font-semibold text-white">
-              Saved{" "}
-              {formatSize(ui.original.bytes - ui.result.bytes)} (
-              {Math.round(
-                (1 - ui.result.bytes / ui.original.bytes) * 100
-              )}
-              % smaller) · Output:{" "}
+            <div className="rounded-xl px-4 py-3 text-center text-sm font-semibold text-white flex items-center justify-center gap-2"
+              style={{ background: "linear-gradient(135deg, #059669, #0891b2)" }}>
+              <CheckCircleIcon size={16} aria-hidden="true" />
+              Saved {formatSize(ui.original.bytes - ui.result.bytes)} (
+              {Math.round((1 - ui.result.bytes / ui.original.bytes) * 100)}% smaller) · Output:{" "}
               <span className="underline underline-offset-2">
                 {formatSize(ui.result.bytes)}
               </span>
@@ -412,40 +468,33 @@ export default function ImageCompressor({ preset, defaultManualKB = 100 }: Props
           )}
 
           {ui.phase === "already_small" && (
-            <div className="rounded-lg bg-sky-600 px-4 py-2.5 text-center text-sm font-semibold text-white">
-              ✓ Image already meets the{" "}
-              {preset ? `${preset.maxSizeKB} KB` : `${manualKB} KB`} requirement
-              — no quality loss applied
+            <div className="rounded-xl px-4 py-3 text-center text-sm font-semibold text-white flex items-center justify-center gap-2"
+              style={{ background: "linear-gradient(135deg, #0284c7, #0891b2)" }}>
+              <CheckCircleIcon size={16} aria-hidden="true" />
+              Image already meets the{" "}
+              {preset ? `${preset.maxSizeKB} KB` : `${manualKB} KB`}{" "}
+              requirement — no quality loss applied
             </div>
           )}
 
-          {/* Download button */}
-          <a
+          {/* Download */}
+          <DownloadButton
             href={ui.result.objectUrl}
-            download={ui.result.filename}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:bg-emerald-800 transition-colors"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 3v12"
-              />
-            </svg>
-            Download {ui.result.filename}
-          </a>
+            filename={ui.result.filename}
+            onDownload={() =>
+              trackEvent("download", {
+                preset: preset?.id ?? "manual",
+                output_kb: Math.round(ui.result.bytes / 1024),
+              })
+            }
+          />
 
-          {/* Compress another */}
-          <button
-            onClick={handleReset}
-            className="w-full rounded-xl border border-zinc-300 bg-white px-6 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 transition-colors"
+          {/* Reset */}
+          <button onClick={handleReset}
+            className="w-full rounded-xl border px-6 py-2.5 text-sm font-medium transition-colors"
+            style={{ background: "#ffffff", borderColor: "#e4e4df", color: "#52525b" }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#fafaf8"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#ffffff"; }}
           >
             Compress another image
           </button>

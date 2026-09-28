@@ -1,15 +1,23 @@
 "use client";
 
 /**
- * PrivacyBanner — appears on every page.
- * Reinforces client-side-only processing for user trust.
+ * PrivacyBanner — visible on every page.
+ * Gradient background + pulsing lock icon.
  */
 export default function PrivacyBanner() {
   return (
-    <div className="w-full bg-emerald-50 border-b border-emerald-200 py-2 px-4">
-      <p className="text-center text-xs text-emerald-800 font-medium">
-        🔒 100% private — your images are compressed entirely in your browser.{" "}
-        <strong>No file is ever uploaded to any server.</strong>
+    <div
+      className="w-full py-2 px-4"
+      style={{
+        background: "linear-gradient(90deg, #064e3b 0%, #065f46 50%, #064e3b 100%)",
+      }}
+    >
+      <p className="flex items-center justify-center gap-1.5 text-center text-xs font-medium text-emerald-100">
+        <span className="inline-block animate-lock-pulse" aria-hidden="true">🔒</span>
+        <span>
+          100% private — compressed entirely in your browser.{" "}
+          <strong className="text-white">No file ever leaves your device.</strong>
+        </span>
       </p>
     </div>
   );

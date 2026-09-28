@@ -3,9 +3,9 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import SiteNav from "@/components/SiteNav";
 import PrivacyBanner from "@/components/PrivacyBanner";
+import AnalyticsScripts from "@/components/AnalyticsScripts";
 
 const geist = Geist({
-  variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
@@ -13,7 +13,9 @@ export const metadata: Metadata = {
   title: "KB Precision Compressor — Compress Images to Exact KB Online",
   description:
     "Compress NADRA CNIC photos, passport photos, visa photos, and more to an exact KB target — instantly in your browser. No uploads. No storage. 100% private.",
-  metadataBase: new URL("https://kbprecision.vercel.app"),
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_BASE_URL ?? "https://kbprecision.vercel.app"
+  ),
 };
 
 export default function RootLayout({
@@ -22,8 +24,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${geist.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col bg-zinc-50 font-sans text-zinc-900">
+    <html lang="en" className={geist.className}>
+      <body className="flex min-h-screen flex-col text-zinc-900 antialiased" style={{ background: "#f5f5f0" }}>
         {/* Privacy notice — visible on every page */}
         <PrivacyBanner />
 
@@ -34,7 +36,7 @@ export default function RootLayout({
         <div className="flex flex-1 flex-col">{children}</div>
 
         {/* Footer */}
-        <footer className="border-t border-zinc-200 bg-white py-6 text-center text-xs text-zinc-400">
+        <footer className="border-t py-6 text-center text-xs" style={{ borderColor: "#e4e4df", background: "#ffffff", color: "#a1a1aa" }}>
           <p>
             KB Precision Compressor — all processing happens in your browser.
             Zero uploads. Zero storage.
@@ -43,6 +45,9 @@ export default function RootLayout({
             &copy; {new Date().getFullYear()} KB Precision · Free forever
           </p>
         </footer>
+
+        {/* Analytics — loads only when env vars are set */}
+        <AnalyticsScripts />
       </body>
     </html>
   );
