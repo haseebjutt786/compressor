@@ -1,12 +1,15 @@
 /**
  * AnalyticsScripts — loads GA4 globally on every page.
  *
- * GA4 Measurement ID G-N52P6EZ121 is hardcoded and always active.
- * Plausible is still supported as an optional addition via env var.
+ * The gtag loader uses strategy="beforeInteractive" so Next.js injects it
+ * into <head> in the initial HTML. This satisfies Google Search Console's
+ * ownership verification requirement ("tracking code must be in <head>").
  *
- * This is a SERVER component — no "use client" needed because
- * next/script with strategy="afterInteractive" works from server components
- * in the App Router.
+ * The init script uses strategy="afterInteractive" because it references
+ * window.dataLayer which only exists in the browser after HTML is parsed.
+ *
+ * Both scripts are placed in the root layout (app/layout.tsx) so they fire
+ * on every page — no per-page additions needed or used.
  */
 
 import Script from "next/script";
@@ -18,11 +21,13 @@ export default function AnalyticsScripts() {
 
   return (
     <>
-      {/* ── Google Analytics 4 — always loaded ─────────────────────────── */}
+      {/* ── GA4 loader — injected into <head> by Next.js ───────────────── */}
       <Script
         src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
-        strategy="afterInteractive"
+        strategy="beforeInteractive"
       />
+
+      {/* ── GA4 init — runs after hydration, accesses window.dataLayer ─── */}
       <Script id="ga4-init" strategy="afterInteractive">
         {`
           window.dataLayer = window.dataLayer || [];
@@ -32,7 +37,7 @@ export default function AnalyticsScripts() {
         `}
       </Script>
 
-      {/* ── Plausible — optional, privacy-first ────────────────────────── */}
+      {/* ── Plausible — optional, set NEXT_PUBLIC_PLAUSIBLE_DOMAIN ─────── */}
       {plausibleDomain && (
         <Script
           src="https://plausible.io/js/script.tagged-events.js"
