@@ -3,7 +3,6 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import SiteNav from "@/components/SiteNav";
 import PrivacyBanner from "@/components/PrivacyBanner";
-import AnalyticsScripts from "@/components/AnalyticsScripts";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -16,6 +15,8 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://www.kbcompress.online"),
 };
 
+const GA_ID = "G-N52P6EZ121";
+
 export default function RootLayout({
   children,
 }: {
@@ -23,7 +24,31 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={geist.className}>
-      <body className="flex min-h-screen flex-col text-zinc-900 antialiased" style={{ background: "#f5f5f0" }}>
+      <head>
+        {/* Google Analytics 4 — raw <script> tags in <head> so Google
+            Search Console ownership verification can detect the snippet.
+            next/script with beforeInteractive only produces a <link rel="preload">
+            which is invisible to GSC's ownership checker. */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script
+          async
+          src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+        />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+gtag('config', '${GA_ID}');
+`,
+          }}
+        />
+      </head>
+      <body
+        className="flex min-h-screen flex-col text-zinc-900 antialiased"
+        style={{ background: "#f5f5f0" }}
+      >
         {/* Privacy notice — visible on every page */}
         <PrivacyBanner />
 
@@ -34,7 +59,14 @@ export default function RootLayout({
         <div className="flex flex-1 flex-col">{children}</div>
 
         {/* Footer */}
-        <footer className="border-t py-6 text-center text-xs" style={{ borderColor: "#e4e4df", background: "#ffffff", color: "#a1a1aa" }}>
+        <footer
+          className="border-t py-6 text-center text-xs"
+          style={{
+            borderColor: "#e4e4df",
+            background: "#ffffff",
+            color: "#a1a1aa",
+          }}
+        >
           <p>
             KB Precision Compressor — all processing happens in your browser.
             Zero uploads. Zero storage.
@@ -43,9 +75,6 @@ export default function RootLayout({
             &copy; {new Date().getFullYear()} KB Precision · Free forever
           </p>
         </footer>
-
-        {/* Analytics — loads only when env vars are set */}
-        <AnalyticsScripts />
       </body>
     </html>
   );
