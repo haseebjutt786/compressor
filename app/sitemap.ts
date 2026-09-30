@@ -1,40 +1,84 @@
 import type { MetadataRoute } from "next";
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://www.kbcompress.online";
+/**
+ * sitemap.ts — auto-serves /sitemap.xml
+ *
+ * Routes verified against actual app/ directory:
+ *   app/page.tsx                              → /
+ *   app/compress-photo-nadra/page.tsx         → /compress-photo-nadra
+ *   app/compress-photo-pakistan-passport/     → /compress-photo-pakistan-passport
+ *   app/compress-photo-us-visa/               → /compress-photo-us-visa
+ *   app/compress-photo-uk-visa/               → /compress-photo-uk-visa
+ *   app/compress-photo-schengen-visa/         → /compress-photo-schengen-visa
+ *   app/resume-photo-size-linkedin/           → /resume-photo-size-linkedin
+ *   app/compress-photo-rozee-pk/              → /compress-photo-rozee-pk
+ *   app/compress-signature-image/             → /compress-signature-image
+ *
+ * Excluded:
+ *   /api/*    — not public SEO pages
+ *   /_next/*  — internal Next.js routes
+ */
 
+const BASE = "https://www.kbcompress.online";
+
+// Static date for the current content version — update when content changes.
+const LAST_MOD = new Date("2026-09-30");
+
+export default function sitemap(): MetadataRoute.Sitemap {
   return [
     {
-      url: baseUrl,
-      lastModified: new Date(),
+      url: BASE,
+      lastModified: LAST_MOD,
+      changeFrequency: "weekly",
+      priority: 1.0,
     },
     {
-      url: `${baseUrl}/compress-photo-pakistan-passport`,
-      lastModified: new Date(),
+      url: `${BASE}/compress-photo-nadra`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.9,
     },
     {
-      url: `${baseUrl}/compress-signature-image`,
-      lastModified: new Date(),
+      url: `${BASE}/compress-photo-pakistan-passport`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.9,
     },
     {
-      url: `${baseUrl}/resume-photo-size-linkedin`,
-      lastModified: new Date(),
+      url: `${BASE}/compress-photo-us-visa`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.9,
     },
     {
-      url: `${baseUrl}/schengen-visa`,
-      lastModified: new Date(),
+      url: `${BASE}/compress-photo-uk-visa`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.9,
     },
     {
-      url: `${baseUrl}/uk-visa`,
-      lastModified: new Date(),
+      url: `${BASE}/compress-photo-schengen-visa`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.9,
     },
     {
-      url: `${baseUrl}/us-visa`,
-      lastModified: new Date(),
+      url: `${BASE}/resume-photo-size-linkedin`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.8,
     },
     {
-      url: `${baseUrl}/rozee-pk`,
-      lastModified: new Date(),
+      url: `${BASE}/compress-photo-rozee-pk`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.8,
+    },
+    {
+      url: `${BASE}/compress-signature-image`,
+      lastModified: LAST_MOD,
+      changeFrequency: "monthly",
+      priority: 0.8,
     },
   ];
 }

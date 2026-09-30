@@ -13,9 +13,7 @@ export const metadata: Metadata = {
   title: "KB Precision Compressor — Compress Images to Exact KB Online",
   description:
     "Compress NADRA CNIC photos, passport photos, visa photos, and more to an exact KB target — instantly in your browser. No uploads. No storage. 100% private.",
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_BASE_URL ?? "https://kbprecision.vercel.app"
-  ),
+  metadataBase: new URL("https://www.kbcompress.online"),
 };
 
 export default function RootLayout({
